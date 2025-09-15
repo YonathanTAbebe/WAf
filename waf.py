@@ -10,6 +10,8 @@ import datetime
 import sys
 import time
 import re
+import json
+import os
 
 # --- CONFIGURATION ---
 WAF_PORT = 8050
@@ -117,6 +119,54 @@ HTTP_SPLITTING_SIGNATURES = [
     "admin"
 ]
 
+# GeoIP configuration (place GeoLite2-Country.mmdb in project root)
+GEOIP_DB_PATH = "GeoLite2-Country.mmdb"
+geoip_reader = None
+
+# Whether to load/use the ML model. Can be disabled via --no-ml flag.
+LOAD_ML = True
+
+BLOCKED_IPS_FILE = 'blocked_ips.json'
+
+
+def load_geoip(db_path=GEOIP_DB_PATH):
+    """
+    Try to load the GeoIP database. Sets global geoip_reader or None on failure.
+    """
+    global geoip_reader
+    try:
+        import geoip2.database
+        geoip_reader = geoip2.database.Reader(db_path)
+        print("[*] GeoIP database loaded successfully.")
+    except Exception as e:
+        print(f"[WAF GEOIP] could not load GeoIP DB: {e}")
+        geoip_reader = None
+
+def load_blocked_ips():
+    try:
+        if os.path.exists(BLOCKED_IPS_FILE):
+            with open(BLOCKED_IPS_FILE, 'r') as f:
+                data = json.load(f)
+            return set(data)
+    except Exception as e:
+        print(f"[WAF BLOCKED IPS] failed to load blocked ips: {e}")
+    return set()
+
+# Configure allowed/blocked country lists (ISO Alpha-2 codes). Empty means disabled.
+ALLOWED_COUNTRIES = []  # e.g. ["US", "CA"] to allow only these
+BLOCKED_COUNTRIES = []  # e.g. ["CN", "RU"] to block these
+
+
+def get_country_from_ip(ip: str):
+    """Return ISO country code for ip or None if unknown or DB missing."""
+    if not geoip_reader:
+        return None
+    try:
+        resp = geoip_reader.country(ip)
+        return resp.country.iso_code
+    except Exception:
+        return None
+
 class WAFProxyHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         self.handle_request()
@@ -124,6 +174,19 @@ class WAFProxyHandler(http.server.SimpleHTTPRequestHandler):
         self.handle_request()
     def handle_request(self):
         client_ip = self.client_address[0]
+        # Enforce UI-driven blocked IPs persisted in blocked_ips.json
+        try:
+            blocked_ips = load_blocked_ips()
+            if client_ip in blocked_ips:
+                print(f"[*] BLOCKED (UI): {client_ip} is in blocked_ips.json")
+                log_blocked(client_ip, "UI Blocked", self.path, self.headers)
+                self.send_response(403)
+                self.send_header("Content-type", "text/plain")
+                self.end_headers()
+                self.wfile.write(b"Request blocked by WAF: IP is blocked via dashboard.")
+                return
+        except Exception:
+            pass
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         now = int(time.time())
         window_start = now - rate_limit_window
@@ -193,6 +256,43 @@ class WAFProxyHandler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(b"Request blocked by WAF: Suspicious User-Agent detected.")
                 return
         print(f"[{timestamp}] Incoming request from {client_ip}: {self.path}")
+        malicious_type = None
+        # Combine path and query string for full inspection
+        parsed_url = urllib.parse.urlparse(self.path)
+        full_path = urllib.parse.unquote(parsed_url.path).lower()
+        query_str = urllib.parse.unquote(parsed_url.query).lower()
+        combined_path_query = full_path + '?' + query_str if query_str else full_path
+        print(f"[DEBUG] combined_path_query: {combined_path_query}")
+        header_str = ' '.join([str(v).lower() for v in self.headers.values()])
+        body_str = ''
+        if self.command == 'POST':
+            content_length = int(self.headers.get('Content-Length', 0))
+            body_bytes = self.rfile.read(content_length)
+            body_str = body_bytes.decode(errors='ignore').lower()
+            self.rfile = http.server.BytesIO(body_bytes)
+
+        # --- GeoIP Blocking ---
+        country = get_country_from_ip(client_ip)
+        if country:
+            if country in BLOCKED_COUNTRIES:
+                reason = f"Blocked Country: {country}"
+                print(f"[*] BLOCKED: {reason} from {client_ip}")
+                log_blocked(client_ip, reason, self.path, self.headers)
+                self.send_response(403)
+                self.send_header("Content-type", "text/plain")
+                self.end_headers()
+                self.wfile.write(f"Request blocked by WAF: Country {country} is not allowed.".encode('utf-8'))
+                return
+            if ALLOWED_COUNTRIES and country not in ALLOWED_COUNTRIES:
+                reason = f"Not allowed Country: {country}"
+                print(f"[*] BLOCKED: {reason} from {client_ip}")
+                log_blocked(client_ip, reason, self.path, self.headers)
+                self.send_response(403)
+                self.send_header("Content-type", "text/plain")
+                self.end_headers()
+                self.wfile.write(f"Request blocked by WAF: Country {country} is not allowed.".encode('utf-8'))
+                return
+
         malicious_type = None
         # Combine path and query string for full inspection
         parsed_url = urllib.parse.urlparse(self.path)
@@ -289,13 +389,18 @@ def run_waf_proxy():
     global BACKEND_PORT
     try:
         with socketserver.TCPServer(("", WAF_PORT), WAFProxyHandler) as httpd:
-            # Load ML model
-            try:
-                import joblib
-                httpd.ml_model = joblib.load("waf_model.joblib")
-                print("[*] ML model loaded for WAF.")
-            except Exception as e:
-                print(f"[WAF ML LOAD ERROR] {e}")
+            # Load ML model if enabled
+            if LOAD_ML:
+                try:
+                    import joblib
+                    httpd.ml_model = joblib.load("waf_model.joblib")
+                    print("[*] ML model loaded for WAF.")
+                except Exception as e:
+                    httpd.ml_model = None
+                    print(f"[WAF ML LOAD ERROR] {e}")
+            else:
+                httpd.ml_model = None
+                print("[*] ML model loading disabled (--no-ml)")
             print(f"\n[*] WAF reverse proxy started on port {WAF_PORT}")
             print(f"[*] WAF is protecting backend at http://localhost:{BACKEND_PORT}")
             print("--------------------------------------------------")
@@ -309,9 +414,36 @@ def run_waf_proxy():
 def main(argv):
     print("Starting WAF demo...")
     print("--------------------------------------------------")
-    print(argv)
-    global BACKEND_PORT
-    BACKEND_PORT = int(argv[1])
+    # Basic arg parsing to support optional --no-geoip and --no-ml flags
+    args = argv[1:]
+    no_geoip = False
+    no_ml = False
+    if '--no-geoip' in args:
+        no_geoip = True
+        args.remove('--no-geoip')
+    if '--no-ml' in args:
+        no_ml = True
+        args.remove('--no-ml')
+    if len(args) < 1:
+        print("Usage: python waf.py [--no-geoip] [--no-ml] <backend_port>")
+        sys.exit(1)
+    global BACKEND_PORT, LOAD_ML
+    try:
+        BACKEND_PORT = int(args[0])
+    except Exception:
+        print("Invalid backend port. Provide an integer.")
+        sys.exit(1)
+    # Load GeoIP unless disabled by flag
+    if not no_geoip:
+        load_geoip()
+    else:
+        print("[*] GeoIP checks disabled (--no-geoip)")
+    # Configure ML loading
+    if no_ml:
+        LOAD_ML = False
+        print("[*] ML model loading disabled (--no-ml)")
+    else:
+        LOAD_ML = True
     import time
     time.sleep(1)
     run_waf_proxy()

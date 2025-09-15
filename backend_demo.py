@@ -9,9 +9,25 @@ BACKEND_PORT = 9000
 class SimpleBackendHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
-        self.send_header('Content-type', 'text/plain')
+        self.send_header('Content-type', 'text/html')
         self.end_headers()
-        self.wfile.write(b'Hello from the backend!')
+        html = '''
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <title>Backend Demo</title>
+            <style>
+                body { display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f4f4f4; }
+                h1 { text-align: center; color: #2c3e50; font-family: Arial, sans-serif; }
+            </style>
+        </head>
+        <body>
+            <h1>Hello from the backend!</h1>
+        </body>
+        </html>
+        '''
+        self.wfile.write(html.encode('utf-8'))
 
     def do_POST(self):
         content_length = int(self.headers.get('Content-Length', 0))

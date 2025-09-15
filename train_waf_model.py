@@ -8,6 +8,9 @@ import joblib
 
 def main():
     # Load features
+    # MODEL INFO: This script uses a Random Forest Classifier from scikit-learn.
+    # It trains on features: length, num_special, num_digits, has_sql_keywords (from waf_features.csv).
+   
     df = pd.read_csv("waf_features.csv")
     print("Columns detected in waf_features.csv:", list(df.columns))
     # For demo: ask user to label some data
@@ -22,7 +25,10 @@ def main():
     clf = RandomForestClassifier(n_estimators=100, random_state=42)
     clf.fit(X_train, y_train)
     y_pred = clf.predict(X_test)
-    print(classification_report(y_test, y_pred))
+    report = classification_report(y_test, y_pred)
+    print(report)
+    with open("classification_report.txt", "w") as f:
+        f.write(report)
     joblib.dump(clf, "waf_model.joblib")
     print("Model saved as waf_model.joblib")
 
