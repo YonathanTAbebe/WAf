@@ -245,6 +245,13 @@ window.addEventListener('DOMContentLoaded', function() {{
 
             .search {{ width:100%; padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,0.04); background:transparent; color:var(--muted) }}
 
+            /* Clock widget styles */
+            .clock {{ display:flex; align-items:center; gap:8px; color:var(--muted); margin-right:6px }}
+            .clock .dot {{ width:10px; height:10px; border-radius:50%; background:rgba(96,165,250,0.95); box-shadow:0 6px 14px rgba(96,165,250,0.12); animation: pulse 2000ms infinite; }}
+            .clock .main {{ font-size:13px; font-weight:600; color:#e6eef8 }}
+            .clock .sub {{ font-size:11px; color:var(--muted); line-height:1 }}
+            @keyframes pulse {{ 0%{{ transform:scale(1); opacity:1 }} 50%{{ transform:scale(1.35); opacity:0.65 }} 100%{{ transform:scale(1); opacity:1 }} }}
+
             footer.note {{ margin-top:16px; color:var(--muted); font-size:12px; text-align:center }}
 
             @media (max-width:900px) {{ .grid {{ grid-template-columns: 1fr; }} .visual-grid {{ grid-template-columns:1fr 1fr }} }}
@@ -261,6 +268,13 @@ window.addEventListener('DOMContentLoaded', function() {{
                     </div>
                 </div>
                 <div class="controls">
+                    <div class="clock" id="clock">
+                        <div class="dot" aria-hidden="true"></div>
+                        <div>
+                            <div class="main" id="clock-main">--:--:--</div>
+                            <div class="sub" id="clock-sub">Loading…</div>
+                        </div>
+                    </div>
                     <button class="btn" onclick="location.reload()">Refresh</button>
                     <button class="btn primary" onclick="toggleDarkMode()">Toggle Theme</button>
                 </div>
@@ -344,6 +358,27 @@ window.addEventListener('DOMContentLoaded', function() {{
         <script>
         function toggleDarkMode() {{ document.body.classList.toggle('alt-theme'); document.querySelector('.logo').classList.toggle('active'); }}
 
+        // Enhanced clock: show time, date and timezone
+        function updateClock() {{
+            const main = document.getElementById('clock-main');
+            const sub = document.getElementById('clock-sub');
+            if (!main || !sub) return;
+            const now = new Date();
+            try {{
+                const timeStr = now.toLocaleTimeString([], {{ hour: '2-digit', minute: '2-digit', second: '2-digit' }});
+                const dateStr = now.toLocaleDateString([], {{ weekday: 'short', month: 'short', day: 'numeric' }});
+                const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+                    main.textContent = timeStr;
+                    sub.textContent = `${{dateStr}} · ${{tz}}`;
+            }} catch (e) {{
+                main.textContent = now.toTimeString().split(' ')[0];
+                sub.textContent = now.toDateString();
+            }}
+        }}
+        // start immediately and update every second
+        updateClock();
+        setInterval(updateClock, 1000);
+
         const ctx = document.getElementById('wafChart').getContext('2d');
         new Chart(ctx, {{
             type: 'doughnut',
@@ -359,17 +394,19 @@ window.addEventListener('DOMContentLoaded', function() {{
 
         // search/filter
         document.addEventListener('DOMContentLoaded', function() {{
-            const searchBox = document.getElementById('searchBox');
-            const table = document.getElementById('requestsTable');
-            searchBox.addEventListener('input', function() {{
-                const filter = searchBox.value.toLowerCase();
-                for (const row of table.tBodies[0].rows) {{
-                    const text = row.innerText.toLowerCase();
-                    row.style.display = text.includes(filter) ? '' : 'none';
-                }}
-            }});
-        }});
-        </script>
+            // kick off clock as soon as DOM is ready
+            updateClock();
+             const searchBox = document.getElementById('searchBox');
+             const table = document.getElementById('requestsTable');
+             searchBox.addEventListener('input', function() {{
+                 const filter = searchBox.value.toLowerCase();
+                 for (const row of table.tBodies[0].rows) {{
+                     const text = row.innerText.toLowerCase();
+                     row.style.display = text.includes(filter) ? '' : 'none';
+                 }}
+             }});
+         }});
+         </script>
         {weighted_chart_js}
     </body>
     </html>
