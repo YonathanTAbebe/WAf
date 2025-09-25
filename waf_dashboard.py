@@ -275,6 +275,7 @@ window.addEventListener('DOMContentLoaded', function() {{
                             <div class="sub" id="clock-sub">Loading…</div>
                         </div>
                     </div>
+                    <button class="btn" onclick="window.location.href='/live'">Live</button>
                     <button class="btn" onclick="location.reload()">Refresh</button>
                     <button class="btn primary" onclick="toggleDarkMode()">Toggle Theme</button>
                 </div>
@@ -513,6 +514,9 @@ def live_page():
     <body>
       <div class="wrap">
         <h2>Live Requests</h2>
+        <div style="margin-top:8px;">
+          <button class="btn" onclick="window.location.href='/'">Back to Dashboard</button>
+        </div>
         <div class="card">
           <input id="filter" class="search" placeholder="Filter by IP, method, path...">
           <table id="liveTable">
