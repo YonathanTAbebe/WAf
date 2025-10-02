@@ -11,7 +11,8 @@ def extract_features(log_file="waf_requests.log", out_csv="waf_features.csv"):
     DIR_TRAV_SIGNATURES = ["../", "..%2f", "..%5c", "..\\.", "..\\"]
     CMD_INJ_SIGNATURES = ["ls", "cat", "whoami", "pwd", "ping", "nc", "sh", "bash", "cmd.exe"]
     LFI_SIGNATURES = ["/etc/passwd", "/etc/password", "/etc/shadow", "/etc/hosts", "/proc/self/cmdline", "c:\\boot.ini", "c:\\windows\\win.ini", "file://", "php://filter"]
-    HTTP_SPLIT_SIGNATURES = ["\n", "\r", "\r\n", "admin"]
+    # Use tighter HTTP response-splitting detection: raw CRLF or percent-encoded CRLF
+    HTTP_SPLIT_SIGNATURES = ["\r\n", "%0d%0a", "%0a%0d", "\n", "\r"]
 
     features = []
     with open(log_file) as f:
@@ -22,6 +23,8 @@ def extract_features(log_file="waf_requests.log", out_csv="waf_features.csv"):
             headers = entry["headers"]
             content = (path + body).lower()
             # Signature-based labeling
+            # HTTP response-splitting detection: require CRLF (raw or percent-encoded) followed by a header-like token
+            http_split_detected = bool(re.search(r'(\r\n|\n|\r|%0d%0a|%0a%0d)\s*[A-Za-z-]+:', content))
             is_malicious = (
                 any(sig in content for sig in SQLI_SIGNATURES)
                 or any(sig in content for sig in XSS_SIGNATURES)
@@ -29,6 +32,7 @@ def extract_features(log_file="waf_requests.log", out_csv="waf_features.csv"):
                 or any(sig in content for sig in CMD_INJ_SIGNATURES)
                 or any(sig in content for sig in LFI_SIGNATURES)
                 or any(sig in content for sig in HTTP_SPLIT_SIGNATURES)
+                or http_split_detected
                 or headers.get("User-Agent", "").lower() == "sqlmap"
             )
             label = 1 if is_malicious else 0
