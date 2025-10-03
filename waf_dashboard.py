@@ -277,7 +277,7 @@ window.addEventListener('DOMContentLoaded', function() {{
                     </div>
                     <button class="btn" onclick="window.location.href='/live'">Live</button>
                     <button class="btn" onclick="location.reload()">Refresh</button>
-                    <button class="btn primary" onclick="toggleDarkMode()">Toggle Theme</button>
+                    <button class="btn primary" onclick="window.location.href='/countries'">Top Countries</button>
                 </div>
             </div>
 
